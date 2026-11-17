@@ -18,6 +18,11 @@
       "path": "internal/domain"
     },
     {
+      "id": "events",
+      "name": "业务事件格式、游标与追赶",
+      "path": "internal/event"
+    },
+    {
       "id": "journal",
       "name": "耐久状态、单实例锁与恢复",
       "path": "internal/journal"

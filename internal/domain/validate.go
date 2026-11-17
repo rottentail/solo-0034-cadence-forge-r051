@@ -133,12 +133,8 @@ func ValidateState(s State) error {
 			return err
 		}
 	}
-	var previous uint64
-	for _, e := range s.Events {
-		if e.Sequence <= previous || e.Sequence > s.Sequence {
-			return fmt.Errorf("event sequence is invalid")
-		}
-		previous = e.Sequence
+	if err := s.Log.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

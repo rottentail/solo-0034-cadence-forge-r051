@@ -1,25 +1,38 @@
 package journal
 
 import (
-	"cadenceforge/internal/domain"
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"syscall"
 )
 
-type Store struct {
+// Codec is the only thing the journal knows about a document. It turns a
+// durable byte image into a typed value and back. The journal never inspects
+// the meaning of those bytes: it does not know about sources, sheets, renders
+// or business events.
+type Codec[T any] interface {
+	Empty() T
+	Decode([]byte) (T, error)
+	Encode(T) ([]byte, error)
+	Validate(T) error
+}
+
+// Store is a single-instance, single-document durable store. Each successful
+// Update replaces the state document once, with the whole typed value
+// committed atomically by temporary file, fsync, rename and directory sync.
+type Store[T any] struct {
 	mu       sync.Mutex
 	root     string
-	state    domain.State
+	codec    Codec[T]
+	raw      []byte
 	lock     *os.File
 	poisoned error
 }
 
-func Open(root string) (*Store, error) {
+func Open[T any](root string, codec Codec[T]) (*Store[T], error) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
@@ -31,15 +44,19 @@ func Open(root string) (*Store, error) {
 		lock.Close()
 		return nil, fmt.Errorf("data root already in use: %w", err)
 	}
-	s := &Store{root: root, state: domain.Empty(), lock: lock}
+	s := &Store[T]{root: root, codec: codec, lock: lock}
+	state := codec.Empty()
 	data, err := os.ReadFile(filepath.Join(root, "state.json"))
 	if err == nil {
-		err = json.Unmarshal(data, &s.state)
+		state, err = codec.Decode(data)
 	} else if os.IsNotExist(err) {
 		err = nil
 	}
 	if err == nil {
-		err = domain.ValidateState(s.state)
+		err = codec.Validate(state)
+	}
+	if err == nil {
+		s.raw, err = codec.Encode(state)
 	}
 	if err != nil {
 		s.Close()
@@ -47,42 +64,39 @@ func Open(root string) (*Store, error) {
 	}
 	return s, nil
 }
-func clone(s domain.State) (domain.State, error) {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return domain.State{}, err
-	}
-	var out domain.State
-	err = json.Unmarshal(b, &out)
-	return out, err
-}
-func (s *Store) Snapshot() (domain.State, error) {
+
+func (s *Store[T]) Snapshot() (T, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return clone(s.state)
+	return s.codec.Decode(s.raw)
 }
-func (s *Store) Update(fn func(*domain.State) error) error {
+
+// Update applies fn to a private copy and commits the resulting document once.
+// If fn makes no observable change, no durable write occurs. A state mutation
+// and anything embedded in the document (including business events) therefore
+// share exactly one commit.
+func (s *Store[T]) Update(fn func(*T) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.poisoned != nil {
 		return s.poisoned
 	}
-	next, err := clone(s.state)
+	next, err := s.codec.Decode(s.raw)
 	if err != nil {
 		return err
 	}
 	if err = fn(&next); err != nil {
 		return err
 	}
-	if reflect.DeepEqual(next, s.state) {
-		return nil
-	}
-	if err = domain.ValidateState(next); err != nil {
-		return fmt.Errorf("state invariant: %w", err)
-	}
-	b, err := json.MarshalIndent(next, "", "  ")
+	b, err := s.codec.Encode(next)
 	if err != nil {
 		return err
+	}
+	if bytes.Equal(b, s.raw) {
+		return nil
+	}
+	if err = s.codec.Validate(next); err != nil {
+		return fmt.Errorf("state invariant: %w", err)
 	}
 	f, err := os.CreateTemp(s.root, ".state-*")
 	if err != nil {
@@ -104,7 +118,7 @@ func (s *Store) Update(fn func(*domain.State) error) error {
 	if err = os.Rename(name, filepath.Join(s.root, "state.json")); err != nil {
 		return err
 	}
-	s.state = next
+	s.raw = b
 	d, err := os.Open(s.root)
 	if err != nil {
 		s.poisoned = err
@@ -118,7 +132,8 @@ func (s *Store) Update(fn func(*domain.State) error) error {
 	}
 	return nil
 }
-func (s *Store) Close() error {
+
+func (s *Store[T]) Close() error {
 	if s.lock != nil {
 		return s.lock.Close()
 	}

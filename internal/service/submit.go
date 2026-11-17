@@ -3,6 +3,7 @@ package service
 import (
 	"cadenceforge/internal/caption"
 	"cadenceforge/internal/domain"
+	"cadenceforge/internal/event"
 	"cadenceforge/internal/timeline"
 	"strings"
 	"time"
@@ -71,7 +72,7 @@ func (s *Service) Submit(key string, request Request) (domain.Render, error) {
 		id := ID()
 		out = domain.Render{ID: id, Key: key, RequestHash: fingerprint, Sheet: sheet, Recipe: recipe, Sources: sources, Plan: plan, State: "queued", Attempts: []domain.Attempt{}, CreatedAt: now, UpdatedAt: now}
 		st.Renders[id] = out
-		st.Emit(id, "render.queued", "frozen source and recipe revisions")
+		st.Append(event.RenderQueued(id))
 		return nil
 	})
 	if err == nil {

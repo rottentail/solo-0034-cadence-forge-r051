@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"cadenceforge/internal/event"
+	"encoding/json"
+	"time"
+)
 
 type Attempt struct {
 	Number     int        `json:"number"`
@@ -34,30 +38,38 @@ type Render struct {
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 }
-type Event struct {
-	Sequence uint64    `json:"sequence"`
-	Subject  string    `json:"subject"`
-	Kind     string    `json:"kind"`
-	Detail   string    `json:"detail"`
-	At       time.Time `json:"at"`
-}
+
+// State is the persisted domain document. The event log is embedded so that a
+// state mutation and the fact explaining it commit in the same durable update,
+// while the event format itself is maintained by the event package. The JSON
+// shape remains the existing one: top-level "sequence" and "events".
 type State struct {
-	Schema   int                 `json:"schema"`
-	Sequence uint64              `json:"sequence"`
-	Sources  map[string]Source   `json:"sources"`
-	Sheets   map[string][]Sheet  `json:"sheets"`
-	Recipes  map[string][]Recipe `json:"recipes"`
-	Renders  map[string]Render   `json:"renders"`
-	Events   []Event             `json:"events"`
+	event.Log
+	Schema  int                 `json:"schema"`
+	Sources map[string]Source   `json:"sources"`
+	Sheets  map[string][]Sheet  `json:"sheets"`
+	Recipes map[string][]Recipe `json:"recipes"`
+	Renders map[string]Render   `json:"renders"`
 }
 
 func Empty() State {
-	return State{Schema: 1, Sources: map[string]Source{}, Sheets: map[string][]Sheet{}, Recipes: map[string][]Recipe{}, Renders: map[string]Render{}, Events: []Event{}}
-}
-func (s *State) Emit(id, kind, detail string) {
-	s.Sequence++
-	s.Events = append(s.Events, Event{Sequence: s.Sequence, Subject: id, Kind: kind, Detail: detail, At: time.Now().UTC()})
+	return State{Log: event.Empty(), Schema: 1, Sources: map[string]Source{}, Sheets: map[string][]Sheet{}, Recipes: map[string][]Recipe{}, Renders: map[string]Render{}}
 }
 func Terminal(state string) bool {
 	return state == "succeeded" || state == "failed" || state == "cancelled"
 }
+
+// StateCodec is the document codec used by the generic journal. It lives in the
+// domain package so the journal needs no knowledge of editing or media.
+type StateCodec struct{}
+
+func (StateCodec) Empty() State { return Empty() }
+func (StateCodec) Decode(b []byte) (State, error) {
+	var st State
+	err := json.Unmarshal(b, &st)
+	return st, err
+}
+func (StateCodec) Encode(st State) ([]byte, error) {
+	return json.MarshalIndent(st, "", "  ")
+}
+func (StateCodec) Validate(st State) error { return ValidateState(st) }

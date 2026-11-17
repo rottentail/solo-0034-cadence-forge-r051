@@ -3,6 +3,7 @@ package service
 import (
 	"cadenceforge/internal/caption"
 	"cadenceforge/internal/domain"
+	"cadenceforge/internal/event"
 	"cadenceforge/internal/timeline"
 	"time"
 )
@@ -33,7 +34,7 @@ func (s *Service) SaveSheet(id string, expected int, input domain.Sheet) (domain
 		input.CreatedAt = time.Now().UTC()
 		out = input
 		st.Sheets[id] = append(versions, input)
-		st.Emit(id, "sheet.revised", "immutable timeline revision saved")
+		st.Append(event.SheetRevised(id))
 		return nil
 	})
 	return out, err

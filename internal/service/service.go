@@ -3,6 +3,8 @@ package service
 import (
 	"cadenceforge/internal/blob"
 	"cadenceforge/internal/config"
+	"cadenceforge/internal/domain"
+	"cadenceforge/internal/event"
 	"cadenceforge/internal/journal"
 	"cadenceforge/internal/media"
 	"context"
@@ -15,7 +17,7 @@ import (
 )
 
 type Service struct {
-	Store    *journal.Store
+	Store    *journal.Store[domain.State]
 	Blobs    *blob.Store
 	Probe    media.Prober
 	Config   config.Config
@@ -26,7 +28,7 @@ type Service struct {
 }
 
 func New(c config.Config) (*Service, error) {
-	st, err := journal.Open(c.Root)
+	st, err := journal.Open(c.Root, domain.StateCodec{})
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +38,10 @@ func New(c config.Config) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{Store: st, Blobs: blobs, Probe: media.Prober{Binary: c.FFprobe}, Config: c, wake: make(chan struct{}, 1), active: map[string]context.CancelFunc{}}
-	if err = st.Recover(); err != nil {
+	if err = st.Update(func(state *domain.State) error {
+		domain.RecoverInterrupted(state)
+		return nil
+	}); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -59,4 +64,15 @@ func (s *Service) Notify() {
 	case s.wake <- struct{}{}:
 	default:
 	}
+}
+
+// Events is the read-side catch-up boundary. It returns a consistent snapshot
+// slice of the durable log; the event package owns ordering and paging, and the
+// transport layer owns the 200-record page limit.
+func (s *Service) Events(cursor uint64, limit int) ([]event.Event, error) {
+	st, err := s.Store.Snapshot()
+	if err != nil {
+		return nil, err
+	}
+	return st.Log.After(cursor, limit), nil
 }

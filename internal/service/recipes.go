@@ -1,6 +1,9 @@
 package service
 
-import "cadenceforge/internal/domain"
+import (
+	"cadenceforge/internal/domain"
+	"cadenceforge/internal/event"
+)
 
 func (s *Service) SaveRecipe(id string, expected int, input domain.Recipe) (domain.Recipe, error) {
 	if err := domain.ValidateRecipe(input); err != nil {
@@ -24,7 +27,7 @@ func (s *Service) SaveRecipe(id string, expected int, input domain.Recipe) (doma
 		input.Revision = len(versions) + 1
 		out = input
 		st.Recipes[id] = append(versions, input)
-		st.Emit(id, "recipe.revised", input.Format)
+		st.Append(event.RecipeRevised(id, input.Format))
 		return nil
 	})
 	return out, err

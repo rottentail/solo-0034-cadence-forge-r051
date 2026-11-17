@@ -2,6 +2,7 @@ package service
 
 import (
 	"cadenceforge/internal/domain"
+	"cadenceforge/internal/event"
 	"time"
 )
 
@@ -29,7 +30,7 @@ func (s *Service) Cancel(id string) (domain.Render, error) {
 			a.FinishedAt = &r.UpdatedAt
 		}
 		st.Renders[id] = r
-		st.Emit(id, "render.cancelled", "artifact visibility revoked before acknowledgement")
+		st.Append(event.RenderCancelled(id))
 		out = r
 		return nil
 	})
@@ -69,7 +70,7 @@ func (s *Service) Retry(id string) (domain.Render, error) {
 		r.State = "queued"
 		r.UpdatedAt = time.Now().UTC()
 		st.Renders[id] = r
-		st.Emit(id, "render.retried", "original frozen inputs retained")
+		st.Append(event.RenderRetried(id))
 		out = r
 		return nil
 	})

@@ -2,6 +2,7 @@ package service
 
 import (
 	"cadenceforge/internal/domain"
+	"cadenceforge/internal/event"
 	"cadenceforge/internal/inspect"
 	"cadenceforge/internal/media"
 	"context"
@@ -35,7 +36,7 @@ func (s *Service) Ingest(ctx context.Context, name string, body io.Reader) (doma
 			}
 		}
 		st.Sources[source.ID] = source
-		st.Emit(source.ID, "source.accepted", name)
+		st.Append(event.SourceAccepted(source.ID, name))
 		return nil
 	})
 	return source, err
@@ -67,7 +68,7 @@ func (s *Service) RetireSource(id string) error {
 			}
 		}
 		delete(st.Sources, id)
-		st.Emit(id, "source.retired", "content retained for conservative reclamation")
+		st.Append(event.SourceRetired(id))
 		return nil
 	})
 }

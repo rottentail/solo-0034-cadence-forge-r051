@@ -6,6 +6,8 @@ import (
 	"strconv"
 )
 
+const eventPageLimit = 200
+
 func (a API) health(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, map[string]string{"status": "ready", "service": "cadence-forge", "schema": "1"})
 }
@@ -108,21 +110,12 @@ func (a API) events(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	st, err := a.Service.Store.Snapshot()
+	events, err := a.Service.Events(after, eventPageLimit)
 	if err != nil {
 		failure(w, err)
 		return
 	}
-	out := []domain.Event{}
-	for _, e := range st.Events {
-		if e.Sequence > after {
-			out = append(out, e)
-			if len(out) == 200 {
-				break
-			}
-		}
-	}
-	write(w, 200, out)
+	write(w, 200, events)
 }
 
 func (a API) visual(w http.ResponseWriter, r *http.Request) {

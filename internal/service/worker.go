@@ -3,6 +3,7 @@ package service
 import (
 	"cadenceforge/internal/domain"
 	"cadenceforge/internal/encoding"
+	"cadenceforge/internal/event"
 	"cadenceforge/internal/inspect"
 	"context"
 	"fmt"
@@ -81,7 +82,7 @@ func (s *Service) claim(cancel context.CancelFunc) (domain.Render, bool, error) 
 		r.UpdatedAt = time.Now().UTC()
 		r.Attempts = append(r.Attempts, domain.Attempt{Number: len(r.Attempts) + 1, StartedAt: r.UpdatedAt, Outcome: "running"})
 		st.Renders[r.ID] = r
-		st.Emit(r.ID, "render.started", fmt.Sprint(len(r.Attempts)))
+		st.Append(event.RenderStarted(r.ID, len(r.Attempts)))
 		out = r
 		found = true
 		return nil
@@ -173,7 +174,11 @@ func (s *Service) completeLocked(r domain.Render, a *domain.Artifact, cause erro
 			current.Artifact = a
 		}
 		st.Renders[r.ID] = current
-		st.Emit(r.ID, "render."+current.State, last.Detail)
+		if cause != nil {
+			st.Append(event.RenderFailed(r.ID, last.Detail))
+		} else {
+			st.Append(event.RenderSucceeded(r.ID, last.Detail))
+		}
 		return nil
 	})
 	if err != nil {
